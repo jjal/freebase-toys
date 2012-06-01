@@ -1,0 +1,248 @@
+<!doctype html>
+<!--[if lt IE 7]> <html class="no-js lt-ie9 lt-ie8 lt-ie7" lang="en"> <![endif]-->
+<!--[if IE 7]>    <html class="no-js lt-ie9 lt-ie8" lang="en"> <![endif]-->
+<!--[if IE 8]>    <html class="no-js lt-ie9" lang="en"> <![endif]-->
+<!--[if gt IE 8]><!--> <html class="no-js" lang="en"> <!--<![endif]-->
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
+  <title></title>
+  <meta name="description" content="">
+
+  <meta name="viewport" content="width=device-width">
+	<link rel="stylesheet" href="css/style.css">
+	<link type="text/css" rel="stylesheet" href="https://www.gstatic.com/freebase/suggest/3_1/suggest.min.css" />
+	<link type="text/css" href="css/base.css" rel="stylesheet" />
+	<link type="text/css" href="css/ForceDirected.css" rel="stylesheet" />
+
+  <script src="js/libs/modernizr-2.5.3.min.js"></script>
+  <script src="js/libs/json2.js"></script>
+    <script src="js/libs/jit.js"></script>
+	<script src="js/graph.js"></script>
+	<script type="text/javascript" src="http://ajax.googleapis.com/ajax/libs/jquery/1.7.1/jquery.min.js"></script>
+    <script type="text/javascript" src="http://www.gstatic.com/freebase/suggest/3_1/suggest.min.js"></script>
+	
+	
+	 
+	
+<script>      
+var graph = new Array();
+var systemKeys = new Array("type", "permissions", "active_timestamp", "active_end", "active_start", "creator", "acquire_webpage", "search", "attribution" );
+function Trace(str)
+{
+	$("#trace").append(str+"<br/><br/>");
+}
+
+function  createGraph(topicId) {     // Display albums by the specified band.
+    var envelope = {                       // The mqlread query envelope
+		query : {                          // The MQL query 
+			//type: "/music/artist",         // Find a band
+			id: topicId,                    // With the specified name
+			"*": [{}]
+		}
+	};
+
+    //var output = $("#main");                          // Output goes here
+    //output.html("<h1>Albums by " + band + "</h1>");     // Display a title
+
+    // Invoke mqlread and call the function below when it is done.
+    // Adding callback=? to the URL makes jQuery do JSONP instead of XHR.
+    jQuery.getJSON("http://api.freebase.com/api/service/mqlread?callback=?",
+		   {query: JSON.stringify(envelope)},   // URL parameters
+		   displayResults);                     // Callback function
+
+    // This function is invoked when we get the result of our MQL query
+    function displayResults(response) {  
+		if (response.code == "/api/status/ok" && response.result) { // Check for success...
+			var props = response.result;         // Get albums.
+			Trace("<pre>"+JSON.stringify(response.result, null, 4)+"</pre>");
+			var root = toGraph(props);
+			Trace(JSON.stringify(graph));
+		} else {  // On failure...
+			output.append("<br/> status: "+response.code);
+			output.append("Unknown query: " + band);     // Display message.
+			output.append("<br/> error: "+response.messages);
+		}
+		
+		var fd = init();
+			// load JSON data.
+		 fd.loadJSON(graph);
+		  // compute positions incrementally and animate.
+		 fd.computeIncremental({
+			iter: 40,
+			property: 'end',
+			onStep: function(perc){
+			  Log.write(perc + '% loaded...');
+			},
+			onComplete: function(){
+			  Log.write('done');
+			  fd.animate({
+				modes: ['linear'],
+				transition: $jit.Trans.Elastic.easeOut,
+				duration: 2500
+			  });
+			}
+		});
+    };
+}
+
+function toList(obj)
+{
+	var str = "<ul>";
+	$.each(obj, function(key,val){
+		str += "<li>";
+		str += key+": ";
+		if(val instanceof Object) {
+			str += toList(val);
+		} else {
+			str += val;
+		}
+	});
+	return str;
+}
+
+function toGraph(obj,parentid,propname)
+{
+	var node = {
+		"id": extractId(obj),
+		"name": extractName(obj),
+		"data": { 
+			"$color": name ? "#aaaaaa" : "#ff00ff", 
+			"$type": "circle" 
+		},
+		"adjacencies" : []
+	};	
+	if(parentid && propname)
+	{
+		if(!node.name) // if this is like an array node it will have no actual freebase counterpart - no name or id so we'll label it with the parent node's property
+			node.name = propname;
+		if(!node.id)
+			node.id = parentid+"-"+propname;
+	}
+	if(obj.type)
+		node.name += " ("+extractType(obj)+")";
+		
+	$.each(obj, function (key,val)
+	{
+		//$("#trace").append("inArray:"+key+" "+systemKeys+" - "+jQuery.inArray(key,systemKeys)+"<br/>");
+		if(val != node && (val instanceof Object || val instanceof Array) && jQuery.inArray(key,systemKeys)<0)
+		{
+			var propNode = toGraph(val, node.id, key);
+			propNode.adjacencies.push(
+			{
+				"nodeTo": propNode.id, 
+				"nodeFrom": node.id, 
+				"data": { "$color": "#aaaaaa" }
+			});
+			node.adjacencies.push(
+			{
+				"nodeTo": propNode.id, 
+				"nodeFrom": node.id, 
+				"data": { "$color": "#aaaaaa"}
+			});
+		}
+	});
+	graph.push(node);
+	return node;
+}
+
+function extractType(obj)
+{
+	var type = "";
+	if(obj.type instanceof Array)
+	{
+		$.each(obj.type, function(val) { type += (type.length>0?", ":"")+val });
+	}
+	else
+		type = obj.type;
+	return type;
+}
+
+function extractName(obj)
+{
+	if(typeof(obj)=='string' || typeof(obj)=='undefined')
+		return obj;
+	else if(obj.name)
+		return extractId(obj.name);
+	else if(obj.type == '/type/text')
+		return obj.value;
+	else 
+		return extractId(obj[0]);
+	return obj;
+}
+	
+function extractId(obj)
+{
+	if(typeof(obj)=='string'|| typeof(obj)=='undefined')
+		return obj;
+	else if(obj.id)
+		return extractId(obj.id);
+	else if(obj.type == '/type/id')
+		return obj.value;
+	else 
+		return extractId(obj[0]);
+	return obj;
+}
+</script>
+
+<style>
+	#side {
+		width: 200px;
+		float: left;
+	}
+	#main {
+		background: #fff;
+	}
+</style>
+</head>
+<body>
+  
+
+  <header>
+
+  </header>
+  
+  <div role="side" id="side">
+<input id="myinput" type="text">
+      <script type="text/javascript">
+$("#myinput")
+ .suggest()
+ .bind("fb-select", function(e, data) {
+   //$("#main").innerHTML = data.name + ", " + data.id + " (" + data['n:type'].name + ")";
+   createGraph(data.id);
+});
+
+      </script>
+  </div>
+  <div role="main" id="main">
+		<div id="infovis"></div>    
+
+	<div id="right-container">
+
+	<div id="inner-details"></div>
+
+	</div>
+	
+  </div>
+  <footer>
+
+  </footer>
+
+	<script type="text/javascript">
+	$(document).ready(function() {
+		$("#myinput").suggest({key:'AIzaSyAZmFG3xEfb6XCU4JjW4OMH1-rz6T9XVvY'});
+		$("#trace").hide();
+		$("#tracetoggle").show();
+
+		$('#tracetoggle').click(function(){
+				$("#trace").slideToggle();
+		});
+	});
+	</script>
+
+<div id="log"></div> 
+<div id="trace">
+</div>  
+<div id="tracetoggle" onclick="toggleTrace()">Show Trace</div>
+</body>
+</html>
